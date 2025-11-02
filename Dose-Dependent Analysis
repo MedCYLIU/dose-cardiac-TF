@@ -1,0 +1,183 @@
+library(ggplot2)
+library(dplyr)
+library(reshape2)
+library(pheatmap)
+library(clusterProfiler)
+library(org.Rn.eg.db)
+
+
+# 1. Dose-Dependent Analysis - Identifying Dose-Response TFs
+# Calculate the dose-response pattern for each TF
+# Evaluate dose-response relationships using linear models
+
+dose_response_analysis <- function(expression_vec, groups) {
+  # Allocate numerical doses：NR=0, GY10=10, GY20=20, GY30=30
+  dose_numeric <- ifelse(groups == "NR", 0,
+                         ifelse(groups == "GY10", 10,
+                                ifelse(groups == "GY20", 20, 30)))
+  
+  # Linear model
+  lm_fit <- lm(expression_vec ~ dose_numeric)
+  lm_summary <- summary(lm_fit)
+  
+  # Return slope, p-value, and R-squared
+  return(c(
+    slope = coef(lm_fit)[2],
+    p_value = lm_summary$coefficients[2, 4],
+    r_squared = lm_summary$r.squared
+  ))
+}
+
+# Conduct a dose-response analysis for each TF
+dose_response_results <- t(apply(tf_expression, 1, function(x) {
+  dose_response_analysis(x, sample_groups)
+}))
+
+dose_response_df <- as.data.frame(dose_response_results)
+dose_response_df$TF <- rownames(dose_response_df)
+dose_response_df$adj_p_value <- p.adjust(dose_response_df$p_value, method = "BH")
+
+# Marked Dose-Response TF
+dose_response_df$significant <- dose_response_df$adj_p_value < 0.05 & 
+  abs(dose_response_df$slope) > 0.1
+
+cat("Significant dose-response TF count:", sum(dose_response_df$significant), "\n")
+
+# 2. Incorporate known cardiac radiotherapy-related TFs as positive controls
+# Literature-based cardiac-related TFs
+cardiac_related_tf <- c(
+  # Cardiac development and function-related
+  “Gata4”, “Gata6”, “Nkx2-5”, “Tbx5”, “Tbx20”, ‘Mef2c’, “Mef2a”,
+  “Srf”, “Myocd”, “Tead1”, “Hand1”, “Hand2”, ‘Irx4’, “Isl1”,
+  # Stress response-related
+  “Nfkb1”, “Rela”, “Stat3”, “Jun”, “Fos”, ‘Atf2’, “Creb1”,
+  # Fibrosis-related
+  “Twist1”, “Snai1”, “Snai2”, ‘Zeb1’, “Tcf21”,
+  # Apoptosis-related
+  “Tp53”, “Bax”, “Bcl2”, ‘Foxo1’, “Foxo3”
+)
+
+base::intersect(cardiac_related_tf,rownames(bulk_dataset))
+
+# Look up these TFs in the rat gene symbol
+cardiac_tf_in_data <- base::intersect(cardiac_related_tf, tf_in_deg)
+cat("Number of cardiac-related transcription factors identified in the data:", length(cardiac_tf_in_data), "\n")
+print(cardiac_tf_in_data)
+
+# Combine dose-response and correlation data
+key_tf_candidates <- base::merge(dose_response_df, dose_corr_df, by.x = "TF", by.y = "TF")
+colnames(key_tf_candidates)[which(colnames(key_tf_candidates) == "Dose_Correlation")] <- "dose_correlation"
+
+
+# Filter Key TFs
+key_tf_candidates$key_score <- abs(key_tf_candidates$slope) * 
+  abs(key_tf_candidates$dose_correlation) * 
+  (-log10(key_tf_candidates$adj_p_value))
+
+# Mark whether it is a known cardiac TF
+key_tf_candidates$is_cardiac_tf <- key_tf_candidates$TF %in% cardiac_tf_in_data
+
+# Select top key TF
+colnames(key_tf_candidates)
+top_key_tf <- key_tf_candidates %>%
+  dplyr::filter(
+    # Relax significance criteria: use raw p-value < 0.1 or adjusted p-value < 0.2
+    (p_value < 0.1 | adj_p_value < 0.2) & 
+      # Relax slope criteria
+      (abs(slope.dose_numeric) > 0.05) &
+      # Relax correlation criterion
+      (abs(dose_correlation) > 0.3)
+  ) %>%
+  #  Prioritize known cardiac TFs even if they do not fully satisfy the above conditions
+  dplyr::mutate(priority = ifelse(is_cardiac_tf, 2, 1)) %>%
+  dplyr::arrange(desc(priority), desc(key_score)) %>%
+  head(60)  
+
+
+if (nrow(top_key_tf) < 15) {
+  cat("The number of TFs screened is insufficient; further relax the conditions......\n")
+  
+  top_key_tf <- key_tf_candidates %>%
+    dplyr::filter(
+# Further Relaxation of Conditions
+      (p_value < 0.05 | is_cardiac_tf) & 
+        (abs(slope) > 0.02) &              
+        (abs(dose_correlation) > 0.2)      
+    ) %>%
+    dplyr::mutate(priority = ifelse(is_cardiac_tf, 2, 1)) %>%
+    dplyr::arrange(desc(priority), desc(key_score)) %>%
+    head(30)
+}
+top_key_tf
+
+
+print(top_key_tf[, c("TF", "slope.dose_numeric", "dose_correlation", "adj_p_value", "key_score", "is_cardiac_tf")])
+
+expanded_cardiac_tf <- c(
+ # Core Cardiac Development Transcription Factors
+  "Gata4", "Gata6", "Nkx2-5", "Tbx5", "Tbx20", "Mef2c", "Mef2a", "Mef2d",
+  "Srf", "Myocd", "Tead1", "Hand1", "Hand2", "Irx4", "Isl1", "Pitx2",
+  
+  # Cardiac Stress and Hypertrophy
+  "Nfatc1", "Nfatc2", "Nfatc3", "Nfatc4", "Hif1a", "Hif1b", "Crebbp", "Ep300",
+  
+ # Inflammation and Fibrosis-Related
+  "Nfkb1", "Nfkb2", "Rela", "Relb", "Stat3", "Stat1", "Smad2", "Smad3", "Smad4",
+  "Twist1", "Snai1", "Snai2", "Zeb1", "Zeb2", "Tcf21", "Runx1", "Runx2",
+  
+    # Apoptosis and Autophagy Related
+  "Tp53", "Bax", "Bcl2", "Bcl2l1", "Foxo1", "Foxo3", "Foxo4", "Atf4", "Atf6",
+  
+ # Metabolism and Mitochondria-Related
+  "Pparg", "Ppara", "Ppargc1a", "Esrra", "Nrf1", "Nfe2l2",
+  
+  # Other Important Cardiac Transcription Factors
+  "Klf4", "Klf5", "Egr1", "Fos", "Jun", "Creb1", "Usf1", "Usf2", "Sp1"
+)
+
+expanded_cardiac_in_data <- base::intersect(expanded_cardiac_tf, tf_in_deg)
+cat("Number of cardiac-related transcription factors identified after expansion:", length(expanded_cardiac_in_data), "\n")
+print(expanded_cardiac_in_data)
+
+
+key_tf_expression <- tf_expression[top_key_tf$TF, ]
+key_tf_scaled <- t(scale(t(key_tf_expression)))
+
+annotation_row <- data.frame(
+  Cardiac_TF = ifelse(top_key_tf$TF %in% cardiac_tf_in_data, "Yes", "No"),
+  Dose_Response = ifelse(top_key_tf$slope > 0, "Up", "Down")
+)
+rownames(annotation_row) <- top_key_tf$TF
+
+
+ann_colors <- list(
+  Group = c("NR"="#3288BD",
+           "GY10"="#FEE08B","GY20"="#F46D43",
+           "GY30"="#9E0142"),
+  Cardiac_TF = c("Yes" = "red", "No" = "gray"),
+  Dose_Response = c("Up" = "red", "Down" = "blue")
+)
+
+key_tf_scaled1 <- data.frame(NR=rowMeans(key_tf_scaled[,c(1,2,3)]),
+                     GY10=rowMeans(key_tf_scaled[,c(4,5,6)]),
+                     GY20=rowMeans(key_tf_scaled[,c(7,8,9)]),
+                     GY30=rowMeans(key_tf_scaled[,c(10,11,12)]))
+
+annotation_col <- data.frame(Group = factor(c(rep("NR"),rep("GY10"), rep("GY20"),rep("GY30"))))
+rownames(annotation_col) <- colnames(key_tf_scaled1)
+
+p_key_heatmap <- pheatmap(key_tf_scaled1,
+                          annotation_col = annotation_col,
+                          annotation_row = annotation_row,
+                          annotation_colors = ann_colors,
+                          color = colorRampPalette(c("#0099CC", "white", "#CC0033"))(100),
+                          show_rownames = TRUE,
+                          show_colnames = F,
+                          cluster_cols = FALSE,
+                          cluster_rows = TRUE,
+                          scale = "row",treeheight_row=0,    
+                          fontsize_row = 10,
+                          fontsize_col = 10,border = F,
+                          main = "Key Transcription Factors in Cardiac Radiation Response\n(Dose-Dependent Expression)")
+
+p_key_heatmap
