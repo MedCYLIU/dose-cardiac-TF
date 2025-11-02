@@ -1,0 +1,118 @@
+top_30_genes <- rownames(head(pc1_contrib_sorted, 30))
+# Select the Ensembl database for rats
+mart <- useMart("ensembl", dataset = "rnorvegicus_gene_ensembl")  # 修改点：更换为大鼠数据集
+
+# Retrieve chromosome location information for a gene
+# Required attributes: chromosome name, start position, end position, strand
+genes_info <- getBM(attributes = c("external_gene_name", "chromosome_name", "start_position", "end_position", "strand"),
+                    filters = "external_gene_name",
+                    values = top_30_genes,
+                    mart = mart)
+
+# Note: Some genes may not be recorded, so we may obtain information on fewer than 30 genes.
+# Check the results.
+print(genes_info)
+
+chromosomes <- c(1:20, "X", "Y")  # 注意：大鼠常染色体通常是1-20[citation:5]
+genes_info <- genes_info[genes_info$chromosome_name %in% chromosomes, ]
+
+# Now, we plot the distribution of these genes on the chromosomes.
+
+# First, plot a bar chart showing the number of genes on each chromosome
+library(ggplot2)
+
+# Count the number of genes on each chromosome
+chr_gene_count <- as.data.frame(table(genes_info$chromosome_name))
+colnames(chr_gene_count) <- c("Chromosome", "Count")
+
+# Sort by Chromosome (Convert chromosomes to factors and sort numerically and by X, Y)
+chr_levels <- c(1:19, "X", "Y")
+chr_gene_count$Chromosome <- factor(chr_gene_count$Chromosome, levels = chr_levels)
+
+p_chr_count <- ggplot(chr_gene_count, aes(x = Chromosome, y = Count)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(title = "Number of Top 30 Genes on Each Chromosome",
+       x = "Chromosome", y = "Number of Genes") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
+        axis.title = element_text(face = "bold", size = 14),
+        axis.text = element_text(size = 12))
+
+print(p_chr_count)
+
+# Second, plot a scatter plot of gene positions on chromosomes (Manhattan plot style)
+# We need to arrange gene positions on each chromosome in genomic order.
+
+# First, we obtain the length of each chromosome (optional, for adjusting the x-axis range), but here we only use position information.
+
+# We use the start position from genes_info as the gene's location.
+
+# Assign each chromosome a numerical ID for positioning on the x-axis.
+chr_order <- data.frame(chr = chr_levels, order = 1:length(chr_levels))
+genes_info_plot <- merge(genes_info, chr_order, by.x = "chromosome_name", by.y = "chr")
+
+# However, we can also use the factor levels to sort.
+genes_info_plot$chromosome_name <- factor(genes_info_plot$chromosome_name, levels = chr_levels)
+
+# Then, we can sort by chromosome on the x-axis, with the y-axis representing the starting position of the gene
+p_chr_pos <- ggplot(genes_info_plot, aes(x = chromosome_name, y = start_position)) +
+  geom_point(aes(color = chromosome_name), size = 3, alpha = 0.7) +
+  labs(title = "Genomic Positions of Top 30 Genes",
+       x = "Chromosome", y = "Start Position (bp)") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
+        axis.title = element_text(face = "bold", size = 14),
+        axis.text = element_text(size = 12),
+        legend.position = "none") +
+  scale_y_continuous(labels = scales::comma)  # 使用逗号分隔大数字
+p_chr_pos
+
+
+#contri
+top_30_genes <- rownames(head(pc1_contrib_sorted, 30))
+
+# Connect to the Rat Ensembl Database
+mart <- useMart("ensembl", dataset = "rnorvegicus_gene_ensembl") 
+  
+# Obtain the chromosomal location information of a gene
+genes_info_plot <- getBM(
+  attributes = c("external_gene_name", "chromosome_name", "start_position", "end_position"),
+  filters = "external_gene_name",
+  values = top_30_genes,
+  mart = ensembl
+)
+
+# Add contribution information
+genes_info_plot$Contribution <- pc1_contrib_sorted[genes_info_plot$external_gene_name, "Contribution_PC1"]
+
+# Retain only autosomes
+valid_chromosomes <- c(1:19, "X", "Y", "MT")
+genes_info_plot <- genes_info_plot[genes_info_plot$chromosome_name %in% valid_chromosomes, ]
+
+# Now drawing the shape
+library(ggrepel)
+genes_info_plot$chromosome_name <- c( "08","13","X","12","07","03","19","10","X","02","03","06","06","06","04",
+                                      "09","13","15","07","15","14",
+                                      "01","17","11","02","01" )
+ggplot(genes_info_plot, aes(x = chromosome_name, y = start_position)) +
+  geom_point(aes(size = Contribution, color = Contribution), alpha = 0.7) +
+  geom_text_repel(aes(label = external_gene_name), 
+                  size = 4,
+                  fontface = "bold.italic",
+                  max.overlaps = 30,
+                  box.padding = 0.5,
+                  point.padding = 0.3,
+                  segment.color = "grey50",
+                  segment.size = 0.5,
+                  min.segment.length = 0) +  # 即使很近也绘制连接线
+  scale_size_continuous(range = c(3, 8), name = "Contribution\n(%)") +
+  scale_color_viridis_c(name = "Contribution\n(%)") +
+  labs(title = "Genomic Positions of Top 30 Genes",
+       x = "Chromosome", y = "Start Position (bp)") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
+        axis.title = element_text(face = "bold", size = 14),
+        axis.text = element_text(size = 12),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.title = element_text(face = "bold", size = 12)) +
+  scale_y_continuous(labels = scales::comma)
