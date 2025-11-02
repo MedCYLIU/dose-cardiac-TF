@@ -1,0 +1,116 @@
+# Create the core TF-IDF score plot for the stream plot style
+# Create a stream plot to fix label boundary issues
+create_refined_stream_plot <- function(motifEnrichmentTable, core_tfs) {
+  
+  # Calculate a score for each core TF
+  tf_scores <- data.frame()
+  
+  for(tf in core_tfs) {
+      # Find the line containing this TF
+    tf_data <- motifEnrichmentTable %>%
+      filter(
+        grepl(tf, TF_highConf) | grepl(tf, TF_lowConf)
+      )
+    
+    if(nrow(tf_data) > 0) {
+   # Calculate various scoring metrics
+      score_summary <- data.frame(
+        TF = tf,
+        max_NES = max(tf_data$NES),
+        mean_NES = mean(tf_data$NES),
+        total_motifs = nrow(tf_data),
+        mean_AUC = mean(tf_data$AUC),
+        stringsAsFactors = FALSE
+      )
+      
+      tf_scores <- rbind(tf_scores, score_summary)
+    }
+  }
+  
+  # Calculate the Comprehensive Score
+  tf_scores <- tf_scores %>%
+    mutate(
+      norm_NES = scale(max_NES),
+      norm_motifs = scale(total_motifs),
+      norm_AUC = scale(mean_AUC),
+      composite_score = 0.5 * norm_NES + 0.3 * norm_motifs + 0.2 * norm_AUC,
+      final_score = (composite_score - min(composite_score)) / 
+        (max(composite_score) - min(composite_score)) * 100
+    ) %>%
+    arrange(desc(final_score))
+  
+# Create a Stream Map for Repairing Label Boundaries
+  p <- ggplot(tf_scores, aes(x = reorder(TF, final_score), y = final_score)) +
+
+    geom_ribbon(
+      aes(ymin = 0, ymax = final_score, group = 1),
+      fill = "#1f77b4",
+      alpha = 0.2
+    ) +
+    geom_line(aes(group = 1), color = "#1f77b4", linewidth = 1.2) +
+    geom_point(aes(size = total_motifs, color = max_NES), alpha = 0.8) +
+    geom_text_repel(
+      aes(label = TF),
+      direction = "y",
+      hjust = 0,
+      angle = 0,
+      nudge_y = 8,  
+      size = 3.2,
+      family = "Arial",
+      fontface = "bold",
+      segment.size = 0.2,
+      segment.alpha = 0.5,
+      box.padding = 0.3,
+      point.padding = 0.5,
+      max.overlaps = 20
+    ) +
+    scale_color_gradient(
+      low = "#4393C3", 
+      high = "#D6604D",
+      name = "Max NES"
+    ) +
+    scale_size_continuous(
+      range = c(3, 8),
+      name = "Motif Count"
+    ) +
+    coord_cartesian(ylim = c(0, max(tf_scores$final_score) * 1.15)) +  #
+    labs(
+      title = "Core TF Enrichment Stream Plot",
+      subtitle = "TF ranking based on composite enrichment score",
+      x = "Transcription Factor",
+      y = "Composite Enrichment Score (0-100)",
+      caption = "Score combines max NES, motif count, and mean AUC"
+    ) +
+    theme_minimal(base_family = "Arial") +
+    theme(
+      plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
+      plot.subtitle = element_text(size = 12, hjust = 0.5, color = "gray40"),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      axis.text.y = element_blank(),
+      axis.title.y = element_blank(),
+      panel.grid.major.y = element_blank(),
+      panel.grid.minor.y = element_blank(),
+      legend.position = "right"
+    )
+  
+  return(list(plot = p, scores = tf_scores))
+}
+
+
+cat("pic...\n")
+tryCatch({
+  result_refined <- create_refined_stream_plot(motifEnrichmentTable, clean_tf_names)
+  p2_refined <- result_refined$plot
+  tf_scores <- result_refined$scores
+  
+  print(p2_refined)
+  ggsave("core_tf_stream_refined.png", p2_refined, 
+         width = 14, height = 10, dpi = 300, bg = "white")
+  cat("success\n")
+  
+# Output scoring details
+  cat(“\n=== Core TF Score Details ===\n”)
+  print(tf_scores %>% select(TF, final_score, max_NES, total_motifs, mean_AUC))
+}, error = function(e) {
+  cat(“Failed to create the second image:”, e$message, “\n”)
+})
