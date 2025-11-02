@@ -1,0 +1,25 @@
+# boxplot on top30
+top_30_genes <- rownames(head(pc1_contrib_sorted, 30))
+top_30_expression <- as.data.frame(t(bulk_dataset[top_30_genes, ]))
+top_30_expression$Sample <- rownames(top_30_expression)
+
+
+top_30_melted <- melt(top_30_expression, id.vars = "Sample")
+colnames(top_30_melted) <- c("Sample", "Gene", "Expression")
+
+p6 <- ggplot(top_30_melted, aes(x = Gene, y = Expression, fill = Gene)) +
+  geom_boxplot(alpha = 0.8, outlier.size = 1) +
+  scale_fill_brewer(palette = "Set3") +
+  labs(title = "Expression Distribution of Top 10 Genes Contributing to PC1",
+       x = "Genes",
+       y = "Expression Level (log2)") +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
+    axis.title = element_text(face = "bold", size = 14),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12),
+    legend.position = "none"
+  ) +
+  scale_y_log10()
+
+p6
